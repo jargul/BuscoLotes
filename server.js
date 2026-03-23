@@ -23,10 +23,21 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
 // ─── Cache de resultados (en memoria, TTL 10 min) ────────────────────────────
-// Evita re-buscar si el mismo conjunto de keywords+precio fue buscado recientemente.
-// Se resetea al reiniciar el servidor, pero cubre el caso de "busqué hace 2 min".
+// Cachea por keyword INDIVIDUAL. Así "piedra" buscado como parte de
+// "bronce hierro piedra" queda cacheado y la próxima búsqueda de solo "piedra"
+// es instantánea. Al combinar múltiples keywords se deduplican los lotes.
 const RESULT_CACHE = {};
 const RESULT_CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+
+function deduplicateLots(lots) {
+    const seen = new Set();
+    return lots.filter(lot => {
+        const key = `${lot.source}-${lot.lotId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
+}
 
 // ─── Cache de lotes por remate (en disco) ────────────────────────────────────
 // Estructura: { bavastro: { [auctionId]: { [keyword]: [lotId, ...] } }, arechaga: {}, castells: {} }
@@ -383,28 +394,44 @@ app.get('/api/search', async (req, res) => {
         const keywordList = keywords.toLowerCase().split(/\s+/).filter(k => k).sort();
         const minPricePesos = minPrice !== undefined && minPrice !== '' ? parseFloat(minPrice) : 1000;
         const USD_TO_PESOS = 40;
+        const ckFn = kw => `${kw}:${minPricePesos}`;
+        const now = Date.now();
 
-        // Cache de resultados en memoria (TTL 10 min)
-        const cacheKey = `${keywordList.join('|')}:${minPricePesos}`;
-        const cached = RESULT_CACHE[cacheKey];
-        if (cached && Date.now() - cached.ts < RESULT_CACHE_TTL) {
-            console.log(`Result cache hit: ${cacheKey}`);
-            return res.json({ results: cached.results });
+        // Separar keywords ya cacheadas de las que hay que buscar
+        const cachedKeywords = keywordList.filter(kw => {
+            const c = RESULT_CACHE[ckFn(kw)];
+            return c && now - c.ts < RESULT_CACHE_TTL;
+        });
+        const uncachedKeywords = keywordList.filter(kw => !cachedKeywords.includes(kw));
+
+        if (uncachedKeywords.length === 0) {
+            const allResults = deduplicateLots(cachedKeywords.flatMap(kw => RESULT_CACHE[ckFn(kw)].results));
+            console.log(`Full cache hit [${keywordList.join(', ')}] → ${allResults.length} lotes`);
+            return res.json({ results: allResults });
         }
 
-        console.log(`\nBuscando [${keywordList.join(', ')}] minPrice=${minPricePesos}...`);
+        console.log(`\nBuscando [${uncachedKeywords.join(', ')}] (cache: [${cachedKeywords.join(', ')}]) minPrice=${minPricePesos}...`);
 
         const [bavastroLots, castellsLots, arechagaLots] = await Promise.all([
-            fetchBavastroLots(keywordList, minPricePesos, USD_TO_PESOS),
-            fetchCastellsLots(keywordList, minPricePesos, USD_TO_PESOS),
-            fetchArechagaLots(keywordList, minPricePesos, USD_TO_PESOS)
+            fetchBavastroLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
+            fetchCastellsLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
+            fetchArechagaLots(uncachedKeywords, minPricePesos, USD_TO_PESOS)
         ]);
 
         saveCache();
 
-        const allMatchingLots = [...bavastroLots, ...castellsLots, ...arechagaLots];
-        RESULT_CACHE[cacheKey] = { results: allMatchingLots, ts: Date.now() };
-        console.log(`Resultados: ${allMatchingLots.length} lotes encontrados`);
+        const newLots = [...bavastroLots, ...castellsLots, ...arechagaLots];
+
+        // Cachear cada keyword nueva por separado
+        for (const kw of uncachedKeywords) {
+            const kwLots = newLots.filter(lot => (lot.description || '').toLowerCase().includes(kw));
+            RESULT_CACHE[ckFn(kw)] = { results: kwLots, ts: Date.now() };
+        }
+
+        // Combinar nuevos + cacheados y deduplicar
+        const cachedLots = cachedKeywords.flatMap(kw => RESULT_CACHE[ckFn(kw)].results);
+        const allMatchingLots = deduplicateLots([...newLots, ...cachedLots]);
+        console.log(`Resultados: ${allMatchingLots.length} lotes (${uncachedKeywords.length} nuevas, ${cachedKeywords.length} del cache)`);
         res.json({ results: allMatchingLots });
     } catch (error) {
         console.error('Error in /api/search:', error);
