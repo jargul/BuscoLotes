@@ -22,7 +22,13 @@ app.use(cors());
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
-// ─── Cache ────────────────────────────────────────────────────────────────────
+// ─── Cache de resultados (en memoria, TTL 10 min) ────────────────────────────
+// Evita re-buscar si el mismo conjunto de keywords+precio fue buscado recientemente.
+// Se resetea al reiniciar el servidor, pero cubre el caso de "busqué hace 2 min".
+const RESULT_CACHE = {};
+const RESULT_CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+
+// ─── Cache de lotes por remate (en disco) ────────────────────────────────────
 // Estructura: { bavastro: { [auctionId]: { [keyword]: [lotId, ...] } }, arechaga: {}, castells: {} }
 // [] (array vacío) = "ya se buscó esta keyword en este remate y no hubo coincidencias"
 // clave ausente    = "todavía no se buscó"
@@ -79,17 +85,17 @@ async function fetchBavastroLots(keywordList, minPricePesos, USD_TO_PESOS) {
             }
         }
 
-        for (const auction of activeAuctions) {
+        const auctionResults = await Promise.all(activeAuctions.map(async (auction) => {
             const auctionId = String(auction.id);
             const auctionCache = cache.bavastro[auctionId] || {};
             const { uncached, cachedWithMatches, skip } = getCacheStatus(auctionCache, keywordList);
 
             if (skip) {
                 console.log(`Bavastro: remate ${auctionId} saltado (sin coincidencias en cache)`);
-                continue;
+                return [];
             }
 
-            console.log(`Bavastro: remate ${auctionId} — scan nuevas keywords: [${uncached.join(',')}] | refresh precios: [${cachedWithMatches.join(',')}]`);
+            console.log(`Bavastro: remate ${auctionId} — scan: [${uncached.join(',')}] | refresh: [${cachedWithMatches.join(',')}]`);
 
             if (!cache.bavastro[auctionId]) cache.bavastro[auctionId] = {};
             for (const kw of uncached) cache.bavastro[auctionId][kw] = [];
@@ -98,6 +104,7 @@ async function fetchBavastroLots(keywordList, minPricePesos, USD_TO_PESOS) {
                 cachedWithMatches.flatMap(kw => (auctionCache[kw] || []).map(String))
             );
 
+            const matchingLots = [];
             try {
                 let page = 1;
                 let hasMore = true;
@@ -114,7 +121,6 @@ async function fetchBavastroLots(keywordList, minPricePesos, USD_TO_PESOS) {
                         const description = (lotItem.lot.description || '').toLowerCase();
                         let isMatch = false;
 
-                        // Full scan para keywords sin cache
                         for (const kw of uncached) {
                             if (description.includes(kw)) {
                                 cache.bavastro[auctionId][kw].push(lotId);
@@ -122,7 +128,6 @@ async function fetchBavastroLots(keywordList, minPricePesos, USD_TO_PESOS) {
                             }
                         }
 
-                        // Refresh de precios para lotes ya cacheados
                         if (cachedLotIds.has(lotId)) isMatch = true;
 
                         if (isMatch) {
@@ -137,7 +142,7 @@ async function fetchBavastroLots(keywordList, minPricePesos, USD_TO_PESOS) {
                             let imageUrl = '';
                             if (lotItem.lot.images && lotItem.lot.images.length > 0) imageUrl = lotItem.lot.images[0].image;
 
-                            allMatchingLots.push({
+                            matchingLots.push({
                                 source: 'Bavastro',
                                 auctionId: auction.id,
                                 auctionName: lotItem.lot.auction.name,
@@ -158,7 +163,9 @@ async function fetchBavastroLots(keywordList, minPricePesos, USD_TO_PESOS) {
             } catch (err) {
                 console.error(`Bavastro: error procesando remate ${auctionId}:`, err.message);
             }
-        }
+            return matchingLots;
+        }));
+        allMatchingLots.push(...auctionResults.flat());
     } catch (error) {
         console.error('Bavastro Error:', error.message);
     }
@@ -183,7 +190,7 @@ async function fetchArechagaLots(keywordList, minPricePesos, USD_TO_PESOS) {
             }
         }
 
-        for (const auction of activeAuctions) {
+        const auctionResults = await Promise.all(activeAuctions.map(async (auction) => {
             const auctionId = String(auction.id);
             const isUsd = auction.money === 2;
             const auctionCache = cache.arechaga[auctionId] || {};
@@ -191,10 +198,10 @@ async function fetchArechagaLots(keywordList, minPricePesos, USD_TO_PESOS) {
 
             if (skip) {
                 console.log(`Arechaga: remate ${auctionId} saltado (sin coincidencias en cache)`);
-                continue;
+                return [];
             }
 
-            console.log(`Arechaga: remate ${auctionId} — scan nuevas keywords: [${uncached.join(',')}] | refresh precios: [${cachedWithMatches.join(',')}]`);
+            console.log(`Arechaga: remate ${auctionId} — scan: [${uncached.join(',')}] | refresh: [${cachedWithMatches.join(',')}]`);
 
             if (!cache.arechaga[auctionId]) cache.arechaga[auctionId] = {};
             for (const kw of uncached) cache.arechaga[auctionId][kw] = [];
@@ -203,6 +210,7 @@ async function fetchArechagaLots(keywordList, minPricePesos, USD_TO_PESOS) {
                 cachedWithMatches.flatMap(kw => (auctionCache[kw] || []).map(String))
             );
 
+            const matchingLots = [];
             try {
                 const auctionRes = await axios.get(`https://api.arechaga.com.uy/public/auctions/${auctionId}`);
                 const lots = (auctionRes.data.data && auctionRes.data.data.lots) || [];
@@ -229,7 +237,7 @@ async function fetchArechagaLots(keywordList, minPricePesos, USD_TO_PESOS) {
                         const maxPInPesos = isUsd ? maxP * USD_TO_PESOS : maxP;
                         if (maxPInPesos < minPricePesos) continue;
 
-                        allMatchingLots.push({
+                        matchingLots.push({
                             source: 'Arechaga',
                             auctionId: auction.id,
                             auctionName: auction.title,
@@ -246,7 +254,9 @@ async function fetchArechagaLots(keywordList, minPricePesos, USD_TO_PESOS) {
             } catch (err) {
                 console.error(`Arechaga: error procesando remate ${auctionId}:`, err.message);
             }
-        }
+            return matchingLots;
+        }));
+        allMatchingLots.push(...auctionResults.flat());
     } catch (error) {
         console.error('Arechaga Error:', error.message);
     }
@@ -280,76 +290,80 @@ async function fetchCastellsLots(keywordList, minPricePesos, USD_TO_PESOS) {
                 }
             }
 
-            for (const auction of activeAuctions) {
-                if (!auction.RemateId) continue;
-                const auctionId = String(auction.RemateId);
-                const auctionCache = cache.castells[auctionId] || {};
-                const { uncached, cachedWithMatches, skip } = getCacheStatus(auctionCache, keywordList);
+            const auctionResults = await Promise.all(
+                activeAuctions.filter(a => a.RemateId).map(async (auction) => {
+                    const auctionId = String(auction.RemateId);
+                    const auctionCache = cache.castells[auctionId] || {};
+                    const { uncached, cachedWithMatches, skip } = getCacheStatus(auctionCache, keywordList);
 
-                if (skip) {
-                    console.log(`Castells: remate ${auctionId} saltado (sin coincidencias en cache)`);
-                    continue;
-                }
+                    if (skip) {
+                        console.log(`Castells: remate ${auctionId} saltado (sin coincidencias en cache)`);
+                        return [];
+                    }
 
-                console.log(`Castells: remate ${auctionId} — scan nuevas keywords: [${uncached.join(',')}] | refresh precios: [${cachedWithMatches.join(',')}]`);
+                    console.log(`Castells: remate ${auctionId} — scan: [${uncached.join(',')}] | refresh: [${cachedWithMatches.join(',')}]`);
 
-                if (!cache.castells[auctionId]) cache.castells[auctionId] = {};
-                for (const kw of uncached) cache.castells[auctionId][kw] = [];
+                    if (!cache.castells[auctionId]) cache.castells[auctionId] = {};
+                    for (const kw of uncached) cache.castells[auctionId][kw] = [];
 
-                const cachedLotIds = new Set(
-                    cachedWithMatches.flatMap(kw => (auctionCache[kw] || []).map(String))
-                );
+                    const cachedLotIds = new Set(
+                        cachedWithMatches.flatMap(kw => (auctionCache[kw] || []).map(String))
+                    );
 
-                try {
-                    const lotsUrl = `https://subastascastells.com/rest/API/Remate/lotes?Remateid=${auctionId}&RemateTipo=1&Cerrado=false`;
-                    const lotsRes = await axios.get(lotsUrl, {
-                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
-                    });
+                    const matchingLots = [];
+                    try {
+                        const lotsUrl = `https://subastascastells.com/rest/API/Remate/lotes?Remateid=${auctionId}&RemateTipo=1&Cerrado=false`;
+                        const lotsRes = await axios.get(lotsUrl, {
+                            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                        });
 
-                    const lots = (lotsRes.data && lotsRes.data.data)
-                        ? lotsRes.data.data
-                        : (Array.isArray(lotsRes.data) ? lotsRes.data : []);
+                        const lots = (lotsRes.data && lotsRes.data.data)
+                            ? lotsRes.data.data
+                            : (Array.isArray(lotsRes.data) ? lotsRes.data : []);
 
-                    for (const lot of lots) {
-                        const lotId = String(lot.LoteId);
-                        const description = (lot.LoteDescripcion || '').toLowerCase();
-                        let isMatch = false;
+                        for (const lot of lots) {
+                            const lotId = String(lot.LoteId);
+                            const description = (lot.LoteDescripcion || '').toLowerCase();
+                            let isMatch = false;
 
-                        for (const kw of uncached) {
-                            if (description.includes(kw)) {
-                                cache.castells[auctionId][kw].push(lotId);
-                                isMatch = true;
+                            for (const kw of uncached) {
+                                if (description.includes(kw)) {
+                                    cache.castells[auctionId][kw].push(lotId);
+                                    isMatch = true;
+                                }
+                            }
+
+                            if (cachedLotIds.has(lotId)) isMatch = true;
+
+                            if (isMatch) {
+                                const isUsd = (lot.LotePrecioSalidaMonedaWF || '').toUpperCase().includes('USD');
+                                const baseP = parseFloat(lot.LotePrecioSalidaValorWF || lot.LotePrecioSalida) || 0;
+                                const currP = parseFloat(lot.ValorActual) || 0;
+                                const maxP = Math.max(baseP, currP);
+                                const maxPInPesos = isUsd ? maxP * USD_TO_PESOS : maxP;
+                                if (maxPInPesos < minPricePesos) continue;
+
+                                matchingLots.push({
+                                    source: 'Castells',
+                                    auctionId: auction.RemateId,
+                                    auctionName: auction.RemateNombre,
+                                    lotId: lot.LoteId,
+                                    description: lot.LoteDescripcion,
+                                    imageUrl: lot.LoteImageUrl,
+                                    url: `https://subastascastells.com/${lot.DetalleUrl}`,
+                                    basePrice: lot.LotePrecioSalidaValorWF || lot.LotePrecioSalida || 0,
+                                    currentPrice: lot.ValorActual || 0,
+                                    currencyPrefix: lot.LotePrecioSalidaMonedaWF || 'USD'
+                                });
                             }
                         }
-
-                        if (cachedLotIds.has(lotId)) isMatch = true;
-
-                        if (isMatch) {
-                            const isUsd = (lot.LotePrecioSalidaMonedaWF || '').toUpperCase().includes('USD');
-                            const baseP = parseFloat(lot.LotePrecioSalidaValorWF || lot.LotePrecioSalida) || 0;
-                            const currP = parseFloat(lot.ValorActual) || 0;
-                            const maxP = Math.max(baseP, currP);
-                            const maxPInPesos = isUsd ? maxP * USD_TO_PESOS : maxP;
-                            if (maxPInPesos < minPricePesos) continue;
-
-                            allMatchingLots.push({
-                                source: 'Castells',
-                                auctionId: auction.RemateId,
-                                auctionName: auction.RemateNombre,
-                                lotId: lot.LoteId,
-                                description: lot.LoteDescripcion,
-                                imageUrl: lot.LoteImageUrl,
-                                url: `https://subastascastells.com/${lot.DetalleUrl}`,
-                                basePrice: lot.LotePrecioSalidaValorWF || lot.LotePrecioSalida || 0,
-                                currentPrice: lot.ValorActual || 0,
-                                currencyPrefix: lot.LotePrecioSalidaMonedaWF || 'USD'
-                            });
-                        }
+                    } catch (e) {
+                        console.error(`Castells: error procesando remate ${auctionId}:`, e.message);
                     }
-                } catch (e) {
-                    console.error(`Castells: error procesando remate ${auctionId}:`, e.message);
-                }
-            }
+                    return matchingLots;
+                })
+            );
+            allMatchingLots.push(...auctionResults.flat());
         } else {
             console.error('Castells Error: vSUBASTASENPROGRESO no encontrado en el HTML.');
         }
@@ -366,9 +380,18 @@ app.get('/api/search', async (req, res) => {
         const { keywords, minPrice } = req.query;
         if (!keywords) return res.status(400).json({ error: 'Faltan parámetros: keywords' });
 
-        const keywordList = keywords.toLowerCase().split(/\s+/).filter(k => k);
+        const keywordList = keywords.toLowerCase().split(/\s+/).filter(k => k).sort();
         const minPricePesos = minPrice !== undefined && minPrice !== '' ? parseFloat(minPrice) : 1000;
         const USD_TO_PESOS = 40;
+
+        // Cache de resultados en memoria (TTL 10 min)
+        const cacheKey = `${keywordList.join('|')}:${minPricePesos}`;
+        const cached = RESULT_CACHE[cacheKey];
+        if (cached && Date.now() - cached.ts < RESULT_CACHE_TTL) {
+            console.log(`Result cache hit: ${cacheKey}`);
+            return res.json({ results: cached.results });
+        }
+
         console.log(`\nBuscando [${keywordList.join(', ')}] minPrice=${minPricePesos}...`);
 
         const [bavastroLots, castellsLots, arechagaLots] = await Promise.all([
@@ -380,6 +403,7 @@ app.get('/api/search', async (req, res) => {
         saveCache();
 
         const allMatchingLots = [...bavastroLots, ...castellsLots, ...arechagaLots];
+        RESULT_CACHE[cacheKey] = { results: allMatchingLots, ts: Date.now() };
         console.log(`Resultados: ${allMatchingLots.length} lotes encontrados`);
         res.json({ results: allMatchingLots });
     } catch (error) {
