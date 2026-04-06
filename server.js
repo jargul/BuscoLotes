@@ -12,6 +12,7 @@ if (!String.prototype.replaceAll) {
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
+const cheerio = require('cheerio');
 const path = require('path');
 const fs = require('fs');
 
@@ -59,7 +60,7 @@ function loadCache() {
     try {
         if (fs.existsSync(CACHE_FILE)) return JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
     } catch (e) { console.error('Error cargando cache:', e.message); }
-    return { bavastro: {}, arechaga: {}, castells: {}, reysubastas: {} };
+    return { bavastro: {}, arechaga: {}, castells: {}, reysubastas: {}, remotes: {} };
 }
 
 function saveCache() {
@@ -602,6 +603,157 @@ async function fetchCastellsLots(keywordList, minPricePesos, USD_TO_PESOS) {
     return allMatchingLots;
 }
 
+// ─── Remotes.com.uy ───────────────────────────────────────────────────────────
+
+async function fetchRemotesLots(keywordList, minPricePesos) {
+    const allMatchingLots = [];
+    try {
+        console.log('Remotes: obteniendo XML feed...');
+        const feedRes = await axios.get('https://www.remotes.com.uy/feed/publicados/', { timeout: 15000 });
+        const xml = feedRes.data;
+        const $ = cheerio.load(xml, { xmlMode: true });
+
+        const activeAuctions = [];
+        $('channel > item').each((i, el) => {
+            const auctionNode = $(el);
+            const link = auctionNode.children('link').text();
+            let auctionId = '';
+            const match = link.match(/\/remate\/(\d+)/);
+            if (match) auctionId = match[1];
+            
+            if (auctionId) {
+                const title = auctionNode.children('title').text();
+                const fechaTs = parseInt(auctionNode.children('fecha').text(), 10);
+                
+                const lotes = [];
+                auctionNode.find('lotes > lote').each((j, lotEl) => {
+                    const lotNode = $(lotEl);
+                    lotes.push({
+                        title: lotNode.children('title').text(),
+                        link: lotNode.children('link').text(),
+                        foto: lotNode.children('foto').text()
+                    });
+                });
+
+                activeAuctions.push({
+                    id: auctionId,
+                    url: link,
+                    title,
+                    fechaTs,
+                    lotes
+                });
+            }
+        });
+
+        const activeIds = new Set(activeAuctions.map(a => a.id));
+
+        // Expirar remates terminados
+        cache.remotes = cache.remotes || {};
+        for (const id of Object.keys(cache.remotes)) {
+            if (!activeIds.has(id)) {
+                console.log(`Remotes: remate ${id} finalizado, eliminado del cache`);
+                delete cache.remotes[id];
+            }
+        }
+
+        const auctionResults = await Promise.all(activeAuctions.map(async (auction) => {
+            const auctionId = auction.id;
+            const auctionCache = cache.remotes[auctionId] || {};
+            const { uncached, cachedWithMatches, skip } = getCacheStatus(auctionCache, keywordList);
+
+            if (skip) {
+                console.log(`Remotes: remate ${auctionId} saltado (sin coincidencias en cache)`);
+                return [];
+            }
+
+            console.log(`Remotes: remate ${auctionId} — scan: [${uncached.join(',')}] | refresh: [${cachedWithMatches.join(',')}]`);
+
+            if (!cache.remotes[auctionId]) cache.remotes[auctionId] = {};
+            
+            // Extraer el nombre del rematador scrapeando la página del remate (con cache para no volver un cuello de botella)
+            if (!cache.remotes[auctionId]._auctioneer) {
+                try {
+                    const pageRes = await axios.get(auction.url, { timeout: 10000 });
+                    const page$ = cheerio.load(pageRes.data);
+                    const pageTitle = page$('title').text() || '';
+                    let auctioneerName = 'Varias Empresas';
+                    // Generalmente: "Participá del remate de Remates González: Título..."
+                    const titleMatch = pageTitle.match(/Participá del remate de (.*?):/i);
+                    if (titleMatch && titleMatch[1]) {
+                        auctioneerName = titleMatch[1].trim();
+                    } else if (pageTitle.includes('Participá del remate de')) {
+                        auctioneerName = pageTitle.replace('Participá del remate de ', '').split(':')[0].trim();
+                    }
+                    cache.remotes[auctionId]._auctioneer = auctioneerName;
+                } catch (e) {
+                    cache.remotes[auctionId]._auctioneer = 'Varias Empresas';
+                }
+            }
+
+            const auctioneer = cache.remotes[auctionId]._auctioneer;
+
+            for (const kw of uncached) cache.remotes[auctionId][kw] = [];
+
+            const cachedLotIds = new Set(
+                cachedWithMatches.flatMap(kw => (auctionCache[kw] || []).map(String))
+            );
+
+            const matchingLots = [];
+            
+            for (const lot of auction.lotes) {
+                let lotId = lot.link;
+                const lotMatch = lot.link.match(/lote=(\w+)/);
+                if (lotMatch) lotId = lotMatch[1];
+                lotId = String(lotId);
+
+                const description = lot.title.toLowerCase();
+                let isMatch = false;
+
+                for (const kw of uncached) {
+                    if (description.includes(kw)) {
+                        cache.remotes[auctionId][kw].push(lotId);
+                        isMatch = true;
+                    }
+                }
+
+                if (cachedLotIds.has(lotId)) isMatch = true;
+
+                if (isMatch) {
+                    // Los lots del XML no proveen un precio así que lo bypasseamos explícitamente y lo cargamos
+                    let formattedDate = '';
+                    if (auction.fechaTs) {
+                        try {
+                            const d = new Date(auction.fechaTs * 1000); // Unix timestamp
+                            if (!isNaN(d)) formattedDate = d.toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: '2-digit' });
+                        } catch(e){}
+                    }
+
+                    matchingLots.push({
+                        source: `Remotes/${auctioneer}`,
+                        auctionId: auctionId,
+                        auctionName: auction.title,
+                        lotId: lotId,
+                        lotNumber: lotId,
+                        endDate: formattedDate,
+                        description: lot.title,
+                        imageUrl: lot.foto,
+                        url: lot.link,
+                        basePrice: 0,
+                        currentPrice: 0,
+                        currencyPrefix: '$'
+                    });
+                }
+            }
+
+            return matchingLots;
+        }));
+        allMatchingLots.push(...auctionResults.flat());
+    } catch (e) {
+        console.error('Remotes Error:', e.message);
+    }
+    return allMatchingLots;
+}
+
 // ─── API ──────────────────────────────────────────────────────────────────────
 
 app.get('/api/search', async (req, res) => {
@@ -630,17 +782,18 @@ app.get('/api/search', async (req, res) => {
 
         console.log(`\nBuscando [${uncachedKeywords.join(', ')}] (cache: [${cachedKeywords.join(', ')}]) minPrice=${minPricePesos}...`);
 
-        const [bavastroLots, castellsLots, arechagaLots, reySubastasLots, pradoLots] = await Promise.all([
+        const [bavastroLots, castellsLots, arechagaLots, reySubastasLots, pradoLots, remotesLots] = await Promise.all([
             fetchBavastroLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
             fetchCastellsLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
             fetchArechagaLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
             fetchReySubastasLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
-            fetchPradoRematesLots(uncachedKeywords, minPricePesos)
+            fetchPradoRematesLots(uncachedKeywords, minPricePesos),
+            fetchRemotesLots(uncachedKeywords, minPricePesos)
         ]);
 
         saveCache();
 
-        const newLots = [...bavastroLots, ...castellsLots, ...arechagaLots, ...reySubastasLots, ...pradoLots];
+        const newLots = [...bavastroLots, ...castellsLots, ...arechagaLots, ...reySubastasLots, ...pradoLots, ...remotesLots];
 
         // Cachear cada keyword nueva por separado
         for (const kw of uncachedKeywords) {
