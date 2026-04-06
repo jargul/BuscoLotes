@@ -121,7 +121,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 card.className = 'card';
                 
                 const imageHtml = item.imageUrl 
-                    ? `<img src="${item.imageUrl}" alt="Lote" class="card-image" loading="lazy">`
+                    ? `<img src="${item.imageUrl}" alt="Lote" class="card-image" loading="lazy" referrerpolicy="no-referrer">`
                     : `<div class="card-image-placeholder">Sin Foto</div>`;
                 
                 const sourceClassMap = { Bavastro: 'badge-bavastro', Castells: 'badge-castells', Arechaga: 'badge-arechaga', ReySubastas: 'badge-reysubastas', PradoRemates: 'badge-pradoremates' };
