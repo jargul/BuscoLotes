@@ -96,6 +96,36 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     
+    // ── Visto / No Visto (localStorage) ──────────────────────────────
+    const SEEN_KEY = 'buscolotes_seen_lots';
+    function getSeenLots() {
+        try { return new Set(JSON.parse(localStorage.getItem(SEEN_KEY) || '[]')); }
+        catch { return new Set(); }
+    }
+    function markLotsAsSeen(lots) {
+        try {
+            const seen = getSeenLots();
+            lots.forEach(l => seen.add(`${l.source}|${l.lotId}`));
+            // Limitar a 5000 entradas para no inflar el localStorage
+            const arr = Array.from(seen);
+            if (arr.length > 5000) arr.splice(0, arr.length - 5000);
+            localStorage.setItem(SEEN_KEY, JSON.stringify(arr));
+        } catch {}
+    }
+
+    // ── Botón Back to Top ──────────────────────────────────────────────
+    const backToTopBtn = document.getElementById('backToTopBtn');
+    window.addEventListener('scroll', () => {
+        if (window.scrollY > 400) {
+            backToTopBtn.classList.add('visible');
+        } else {
+            backToTopBtn.classList.remove('visible');
+        }
+    }, { passive: true });
+    backToTopBtn.addEventListener('click', () => {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
     function escapeHtml(unsafe) {
         if (!unsafe) return '';
         return unsafe.toString()
@@ -107,13 +137,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function displayResults(results) {
+        const seenLots = getSeenLots();
         resultsCount.textContent = `${results.length} artículos`;
         
         if (results.length === 0) {
             resultsGrid.innerHTML = '<p style="grid-column: 1/-1; text-align: center; color: var(--text-secondary);">No se encontraron artículos que coincidan con la búsqueda.</p>';
         } else {
             results.forEach(item => {
-                const formatPrice = (val, prefix) => val ? `${prefix} ${Number(val).toLocaleString('es-UY', { minimumFractionDigits: 2 })}` : 'N/A';
+                const lotKey = `${item.source}|${item.lotId}`;
+                const isNew = !seenLots.has(lotKey);
+                const isRemotes = item.source && item.source.startsWith('Remotes');
+                const noPriceInfo = isRemotes && !item.basePrice && !item.currentPrice;
+
+                const formatPrice = (val, prefix) => {
+                    if (noPriceInfo) return 'Ver en sitio';
+                    return val ? `${prefix} ${Number(val).toLocaleString('es-UY', { minimumFractionDigits: 2 })}` : 'N/A';
+                };
                 
                 const card = document.createElement('a');
                 card.href = item.url;
@@ -130,7 +169,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const lotNumStr = item.lotNumber ? `Lote ${escapeHtml(item.lotNumber)}` : '';
                 const endDateStr = item.endDate ? ` | Termina: ${escapeHtml(item.endDate)}` : '';
                 
-                const newBadgeHtml = item.isNew ? `<div class="new-badge">✨ NUEVO</div>` : '';
+                const newBadgeHtml = isNew ? `<div class="new-badge">✨ NUEVO</div>` : '';
                 
                 card.innerHTML = `
                     ${newBadgeHtml}
@@ -155,6 +194,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 resultsGrid.appendChild(card);
             });
+            // Marcar todos los lotes como vistos en localStorage
+            markLotsAsSeen(results);
         }
         
         resultsSec.classList.remove('hidden');

@@ -1,4 +1,4 @@
-app = "BuscoLotes"
+app = "buscolotes"
 primary_region = "gru"
 
 [build]
