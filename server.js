@@ -598,18 +598,37 @@ async function fetchCastellsLots(keywordList, minPricePesos, USD_TO_PESOS) {
                                 const maxPInPesos = isUsd ? maxP * USD_TO_PESOS : maxP;
                                 if (maxPInPesos < minPricePesos) continue;
 
-                                let rawDate = lot.LoteCierre || lot.LoteCierreWF || auction.RemateCierre || '';
+                                let rawDate = lot.LoteComienzoCierre || lot.LoteComienzoCierreWF || lot.LoteCierre || lot.LoteCierreWF || auction.RemateCierre || '';
                                 let formattedDate = '';
+                                let fullIsoDate = ''; // Para la alarma
                                 if (rawDate) {
                                     if (rawDate.includes('/Date(')) {
                                         try {
                                             const ts = parseInt(rawDate.match(/\d+/)[0], 10);
-                                            formattedDate = new Date(ts).toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: '2-digit' });
+                                            const d = new Date(ts);
+                                            formattedDate = d.toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: '2-digit' });
+                                            fullIsoDate = d.toISOString();
                                         } catch(e){}
                                     } else {
-                                        // Might be already formatted or parseable
-                                        formattedDate = rawDate; // En Castells LoteCierreWF suele ser dd/mm/yyyy hh:mm
-                                        if (formattedDate.length > 10) formattedDate = formattedDate.substring(0, 10); // just keep the date part
+                                        // "2026-04-27T23:02:00" o "27/04/2026 | 23:02"
+                                        if (rawDate.includes('|')) {
+                                            const parts = rawDate.split('|')[0].trim().split('/');
+                                            if (parts.length === 3) formattedDate = `${parts[0]}/${parts[1]}/${parts[2].substring(2)}`;
+                                            // intentamos sacar la hora también
+                                            const timePart = rawDate.split('|')[1]?.trim();
+                                            if (timePart && parts.length === 3) {
+                                                fullIsoDate = `${parts[2]}-${parts[1]}-${parts[0]}T${timePart}:00`;
+                                            }
+                                        } else if (rawDate.includes('T')) {
+                                            const d = new Date(rawDate);
+                                            if (!isNaN(d)) {
+                                                formattedDate = d.toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: '2-digit' });
+                                                fullIsoDate = rawDate;
+                                            }
+                                        } else {
+                                            formattedDate = rawDate;
+                                            if (formattedDate.length > 10) formattedDate = formattedDate.substring(0, 10);
+                                        }
                                     }
                                 }
 
@@ -621,6 +640,7 @@ async function fetchCastellsLots(keywordList, minPricePesos, USD_TO_PESOS) {
                                     lotId: lot.LoteId,
                                     lotNumber: lot.LoteNumero,
                                     endDate: formattedDate,
+                                    fullDate: fullIsoDate, // Nuevo campo para precisión
                                     description: lot.LoteDescripcion,
                                     imageUrl: lot.LoteImageUrl,
                                     url: `https://subastascastells.com/${lot.DetalleUrl}`,

@@ -141,20 +141,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const alarmLotDesc  = document.getElementById('alarmLotDesc');
     const alarmDateTime = document.getElementById('alarmDateTime');
     const alarmConfirm  = document.getElementById('alarmConfirmBtn');
+    const alarmAndroid  = document.getElementById('alarmAndroidBtn');
     const alarmCancel   = document.getElementById('alarmCancelBtn');
     let currentAlarmItem = null;
+
+    // Detectar si es Android para mostrar botón de Alarma de Reloj
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (isAndroid && alarmAndroid) {
+        alarmAndroid.style.display = 'block';
+    }
 
     function openAlarmModal(item) {
         currentAlarmItem = item;
         alarmLotDesc.textContent = item.description || 'Lote sin descripción';
 
-        // Pre-fill datetime if endDate available (format dd/mm/yy)
-        if (item.endDate) {
+        // Pre-fill datetime
+        if (item.fullDate) {
+            // fullDate es ISO: 2026-04-27T23:02:00
+            alarmDateTime.value = item.fullDate.substring(0, 16);
+        } else if (item.endDate) {
             const parts = item.endDate.split('/');
             if (parts.length === 3) {
                 const [d, m, y] = parts;
                 const year = parseInt(y) < 100 ? 2000 + parseInt(y) : parseInt(y);
-                // Default time 20:00 (typical auction closing)
                 alarmDateTime.value = `${year}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T20:00`;
             }
         } else {
@@ -188,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
             `DTSTAMP:${toIcsDate(new Date())}`,
             `DTSTART:${toIcsDate(reminderTime)}`,
             `DTEND:${toIcsDate(closeTime)}`,
-            `SUMMARY:\u2022 Subasta cierra en 15min: ${desc.substring(0,80)}`,
+            `SUMMARY:\u2022 Cierra: ${desc.substring(0,80)}`,
             `DESCRIPTION:Ver lote: ${url}`,
             'BEGIN:VALARM',
             'TRIGGER:PT0S',
@@ -207,6 +216,24 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.removeChild(a);
         alarmModal.style.display = 'none';
     });
+
+    if (alarmAndroid) {
+        alarmAndroid.addEventListener('click', () => {
+            if (!alarmDateTime.value) { alert('Por favor ingresá la fecha y hora de cierre.'); return; }
+            const closeTime = new Date(alarmDateTime.value);
+            if (isNaN(closeTime)) { alert('Fecha inválida.'); return; }
+            const alarmTime = new Date(closeTime.getTime() - 15 * 60 * 1000);
+            
+            const hour = alarmTime.getHours();
+            const minutes = alarmTime.getMinutes();
+            const message = `Lote Subasta: ${currentAlarmItem.description?.substring(0, 30) || 'Cierre'}`;
+            
+            // Intent para abrir el reloj en Android con la alarma configurada
+            const intentUrl = `intent://#Intent;action=android.intent.action.SET_ALARM;i:hour=${hour};i:minutes=${minutes};s:message=${encodeURIComponent(message)};b:skipUi=false;end`;
+            window.location.href = intentUrl;
+            alarmModal.style.display = 'none';
+        });
+    }
 
     function displayResults(results) {
         const seenLots = getSeenLots();

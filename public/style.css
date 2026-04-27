@@ -544,6 +544,23 @@ input:focus {
     gap: 0.75rem;
     flex-wrap: wrap;
 }
+.alarm-btn-android {
+    flex: 1 1 100%;
+    background: linear-gradient(135deg, #f59e0b, #d97706);
+    color: #fff;
+    border: none;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+    margin-bottom: 0.5rem;
+}
+.alarm-btn-android:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(245, 158, 11, 0.4);
+}
 .alarm-btn-confirm {
     flex: 1;
     background: linear-gradient(135deg, var(--accent-color), #a371f7);

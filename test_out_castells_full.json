@@ -1,0 +1,43 @@
+{
+  "auctionData": {
+    "RemateImagen": "https://cdn.imagenescastells.com/public/235bf479-acad-4eb1-9533-7b9e50d16275.jpeg",
+    "RemateImagen_GXI": "https://cdn.imagenescastells.com/public/235bf479-acad-4eb1-9533-7b9e50d16275.jpeg",
+    "RemateCategoriaNombre": "Antiguedades",
+    "RemateInicio": "2026-04-23",
+    "RemateCierre": "2026-04-27",
+    "RemateComienzoCierre": "1899-12-31T23:00:00",
+    "RemateRangoTexto": "Lun 27 de Abr. | Comienzo 23 h",
+    "RemateItems": "301 lotes  |  &lt;strong&gt; Online &lt;/strong&gt;",
+    "Link": "frontend.sitio.visualremate.aspx?Remate=2597",
+    "RemateId": 2597,
+    "RemateNombre": "Antigüedades "
+  },
+  "lotDataSample": {
+    "LoteId": "525622",
+    "LoteNumero": "1",
+    "LoteDescripcion": "Farol a mantilla antiguo, con caja madera, alcuzas",
+    "LoteImageUrl": "https://cdn.imagenescastells.com/public/eb31c7f1-7f16-4b29-bccc-7eeb58e6ae131a_resize.jpg",
+    "LoteComienzoCierre": "2026-04-27T23:02:00",
+    "LoteComienzoCierreWF": "27/04/2026 | 23:02",
+    "LoteComienzoCierreST": "0000-00-00T00:00:00",
+    "LotePrecioSalida": "800",
+    "LotePrecioSalidaMoneda": 1,
+    "LotePrecioSalidaMonedaWF": "$UY",
+    "LoteRemateId": "0",
+    "LoteRemateInicio": "0000-00-00",
+    "LoteRemateTipo": 0,
+    "LoteRemateNombre": "",
+    "LoteCierre": "0000-00-00T00:00:00",
+    "LoteCierreWF": "",
+    "LoteEstado": 0,
+    "ValorActual": "1400",
+    "ValorOfertar": "1600",
+    "ValorEncarge": "0",
+    "EsMiEncarge": false,
+    "EsFavorito": false,
+    "EsMejorPostor": false,
+    "FueSubastado": false,
+    "SubastadoValor": "0",
+    "DetalleUrl": "frontend.sitio.visuallote.aspx?csu84IAsmdG_j0FZo6cOtNV7RyzQuJY7x2Hwu5vtyzPeB3pLkRTrZoRPK8N5jyHv"
+  }
+}
