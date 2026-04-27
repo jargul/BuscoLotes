@@ -141,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const alarmLotDesc  = document.getElementById('alarmLotDesc');
     const alarmDateTime = document.getElementById('alarmDateTime');
     const alarmConfirm  = document.getElementById('alarmConfirmBtn');
-    const alarmAndroid  = document.getElementById('alarmAndroidBtn');
+    const alarmAndroid  = document.getElementById('alarmAndroidLink');
     const alarmCancel   = document.getElementById('alarmCancelBtn');
     let currentAlarmItem = null;
 
@@ -151,13 +151,32 @@ document.addEventListener('DOMContentLoaded', () => {
         alarmAndroid.style.display = 'block';
     }
 
+    function updateAndroidIntent() {
+        if (!isAndroid || !alarmAndroid || !currentAlarmItem || !alarmDateTime.value) return;
+        
+        const closeTime = new Date(alarmDateTime.value);
+        if (isNaN(closeTime)) return;
+        
+        const alarmTime = new Date(closeTime.getTime() - 15 * 60 * 1000);
+        const hour = alarmTime.getHours();
+        const minutes = alarmTime.getMinutes();
+        const message = `Lote Subasta: ${currentAlarmItem.description?.substring(0, 30) || 'Cierre'}`;
+        
+        // Intent URL directo en el href para que Chrome lo trate como navegación de usuario
+        const intentUrl = `intent://#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${hour};i.android.intent.extra.alarm.MINUTES=${minutes};S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(message)};i.hour=${hour};i.minutes=${minutes};S.message=${encodeURIComponent(message)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
+        
+        alarmAndroid.href = intentUrl;
+    }
+
+    // Actualizar intent cuando cambie la fecha/hora en el modal
+    alarmDateTime.addEventListener('input', updateAndroidIntent);
+
     function openAlarmModal(item) {
         currentAlarmItem = item;
         alarmLotDesc.textContent = item.description || 'Lote sin descripción';
 
         // Pre-fill datetime
         if (item.fullDate) {
-            // fullDate es ISO: 2026-04-27T23:02:00
             alarmDateTime.value = item.fullDate.substring(0, 16);
         } else if (item.endDate) {
             const parts = item.endDate.split('/');
@@ -169,6 +188,8 @@ document.addEventListener('DOMContentLoaded', () => {
         } else {
             alarmDateTime.value = '';
         }
+        
+        updateAndroidIntent();
         alarmModal.style.display = 'flex';
     }
 
@@ -219,42 +240,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (alarmAndroid) {
         alarmAndroid.addEventListener('click', () => {
-            if (!alarmDateTime.value) { alert('Por favor ingresá la fecha y hora de cierre.'); return; }
-            const closeTime = new Date(alarmDateTime.value);
-            if (isNaN(closeTime)) { alert('Fecha inválida.'); return; }
-            
-            // Calculamos 15 mins antes
-            const alarmTime = new Date(closeTime.getTime() - 15 * 60 * 1000);
-            
-            const hour = alarmTime.getHours();
-            const minutes = alarmTime.getMinutes();
-            const message = `Lote Subasta: ${currentAlarmItem.description?.substring(0, 30) || 'Cierre'}`;
-            
-            // Intent para abrir el reloj en Android
-            // Probamos con intent:// y duplicando los extras para mayor compatibilidad
-            const intentUrl = `intent://#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${hour};i.android.intent.extra.alarm.MINUTES=${minutes};S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(message)};i.hour=${hour};i.minutes=${minutes};S.message=${encodeURIComponent(message)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
-            
-            try {
-                // Informar al usuario la hora que se va a setear (útil si el intent falla en abrir la app)
-                console.log("Intent URL:", intentUrl);
-                
-                const a = document.createElement('a');
-                a.href = intentUrl;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                
-                // Pequeño feedback visual
-                const originalText = alarmAndroid.textContent;
-                alarmAndroid.textContent = '✅ Enviado';
-                setTimeout(() => {
-                    alarmAndroid.textContent = originalText;
-                    alarmModal.style.display = 'none';
-                }, 1000);
-            } catch (err) {
-                console.error('Error al disparar intent:', err);
-                alert('No se pudo abrir la app de reloj automáticamente.');
-            }
+            // Cerramos el modal después de un pequeño delay para que el link tenga tiempo de dispararse
+            setTimeout(() => { alarmModal.style.display = 'none'; }, 500);
         });
     }
 
