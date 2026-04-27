@@ -136,6 +136,78 @@ document.addEventListener('DOMContentLoaded', () => {
              .replace(/'/g, "&#039;");
     }
 
+    // ── Alarma / Recordatorio ICS ──────────────────────────────────────
+    const alarmModal    = document.getElementById('alarmModal');
+    const alarmLotDesc  = document.getElementById('alarmLotDesc');
+    const alarmDateTime = document.getElementById('alarmDateTime');
+    const alarmConfirm  = document.getElementById('alarmConfirmBtn');
+    const alarmCancel   = document.getElementById('alarmCancelBtn');
+    let currentAlarmItem = null;
+
+    function openAlarmModal(item) {
+        currentAlarmItem = item;
+        alarmLotDesc.textContent = item.description || 'Lote sin descripción';
+
+        // Pre-fill datetime if endDate available (format dd/mm/yy)
+        if (item.endDate) {
+            const parts = item.endDate.split('/');
+            if (parts.length === 3) {
+                const [d, m, y] = parts;
+                const year = parseInt(y) < 100 ? 2000 + parseInt(y) : parseInt(y);
+                // Default time 20:00 (typical auction closing)
+                alarmDateTime.value = `${year}-${m.padStart(2,'0')}-${d.padStart(2,'0')}T20:00`;
+            }
+        } else {
+            alarmDateTime.value = '';
+        }
+        alarmModal.style.display = 'flex';
+    }
+
+    alarmCancel.addEventListener('click', () => { alarmModal.style.display = 'none'; });
+    alarmModal.addEventListener('click', (e) => { if (e.target === alarmModal) alarmModal.style.display = 'none'; });
+
+    function padZ(n) { return String(n).padStart(2, '0'); }
+    function toIcsDate(d) {
+        return `${d.getUTCFullYear()}${padZ(d.getUTCMonth()+1)}${padZ(d.getUTCDate())}T${padZ(d.getUTCHours())}${padZ(d.getUTCMinutes())}00Z`;
+    }
+
+    alarmConfirm.addEventListener('click', () => {
+        if (!alarmDateTime.value) { alert('Por favor ingresá la fecha y hora de cierre.'); return; }
+        const closeTime = new Date(alarmDateTime.value);
+        if (isNaN(closeTime)) { alert('Fecha inválida.'); return; }
+        const reminderTime = new Date(closeTime.getTime() - 15 * 60 * 1000);
+        const item = currentAlarmItem;
+        const desc = item.description || 'Lote de subasta';
+        const url  = item.url || '';
+        const ics = [
+            'BEGIN:VCALENDAR',
+            'VERSION:2.0',
+            'PRODID:-//BuscoLotes//Recordatorio//ES',
+            'BEGIN:VEVENT',
+            `UID:buscolotes-${Date.now()}@buscolotes`,
+            `DTSTAMP:${toIcsDate(new Date())}`,
+            `DTSTART:${toIcsDate(reminderTime)}`,
+            `DTEND:${toIcsDate(closeTime)}`,
+            `SUMMARY:\u2022 Subasta cierra en 15min: ${desc.substring(0,80)}`,
+            `DESCRIPTION:Ver lote: ${url}`,
+            'BEGIN:VALARM',
+            'TRIGGER:PT0S',
+            'ACTION:DISPLAY',
+            `DESCRIPTION:Recordatorio - ${desc.substring(0,60)}`,
+            'END:VALARM',
+            'END:VEVENT',
+            'END:VCALENDAR'
+        ].join('\r\n');
+        const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `recordatorio-subasta.ics`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        alarmModal.style.display = 'none';
+    });
+
     function displayResults(results) {
         const seenLots = getSeenLots();
         resultsCount.textContent = `${results.length} artículos`;
@@ -147,11 +219,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 const lotKey = `${item.source}|${item.lotId}`;
                 const isNew = !seenLots.has(lotKey);
                 const isRemotes = item.source && item.source.startsWith('Remotes');
-                const noPriceInfo = isRemotes && !item.basePrice && !item.currentPrice;
+                const isPrado   = item.source === 'PradoRemates';
+                const noPriceInfo = (isRemotes || isPrado) && !item.basePrice && !item.currentPrice;
 
                 const formatPrice = (val, prefix) => {
                     if (noPriceInfo) return 'Ver en sitio';
-                    return val ? `${prefix} ${Number(val).toLocaleString('es-UY', { minimumFractionDigits: 2 })}` : 'N/A';
+                    return (val && val > 0) ? `${prefix} ${Number(val).toLocaleString('es-UY', { minimumFractionDigits: 2 })}` : 'N/A';
                 };
                 
                 const card = document.createElement('a');
@@ -191,6 +264,18 @@ document.addEventListener('DOMContentLoaded', () => {
                         </div>
                     </div>
                 `;
+
+                // Botón de alarma (fuera del <a> para no seguir link)
+                const alarmBtn = document.createElement('button');
+                alarmBtn.className = 'alarm-trigger-btn';
+                alarmBtn.title = 'Agregar recordatorio 15 min antes del cierre';
+                alarmBtn.textContent = '🔔';
+                alarmBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    openAlarmModal(item);
+                });
+                card.appendChild(alarmBtn);
                 
                 resultsGrid.appendChild(card);
             });

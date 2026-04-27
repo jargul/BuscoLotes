@@ -450,3 +450,147 @@ input:focus {
         font-size: 2.5rem;
     }
 }
+
+/* ── Alarm trigger button on card ─────────────────────────────── */
+.alarm-trigger-btn {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: rgba(88, 166, 255, 0.18);
+    border: 1px solid rgba(88, 166, 255, 0.4);
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    z-index: 20;
+    opacity: 0.7;
+}
+.alarm-trigger-btn:hover {
+    background: rgba(88, 166, 255, 0.4);
+    opacity: 1;
+    transform: scale(1.15);
+    box-shadow: 0 0 12px rgba(88, 166, 255, 0.5);
+}
+
+/* ── Alarm Modal ───────────────────────────────────────────────── */
+.alarm-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    padding: 1rem;
+}
+.alarm-modal {
+    background: var(--surface-color);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    max-width: 440px;
+    width: 100%;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6), 0 0 30px rgba(88, 166, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+.alarm-modal h3 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #fff;
+}
+.alarm-lot-desc {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 0.8rem;
+    line-height: 1.4;
+    max-height: 80px;
+    overflow: hidden;
+}
+.alarm-datetime-input {
+    width: 100%;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-sm);
+    font-size: 1rem;
+    font-family: var(--font-family);
+}
+.alarm-datetime-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.2);
+}
+.alarm-hint {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-style: italic;
+}
+.alarm-modal-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.alarm-btn-confirm {
+    flex: 1;
+    background: linear-gradient(135deg, var(--accent-color), #a371f7);
+    color: #fff;
+    border: none;
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.alarm-btn-confirm:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(88, 166, 255, 0.4);
+}
+.alarm-btn-cancel {
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.alarm-btn-cancel:hover {
+    border-color: var(--error-color);
+    color: var(--error-color);
+}
+
+.btn-small {
+    background: var(--surface-hover);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.btn-small:hover {
+    border-color: var(--accent-color);
+    color: var(--accent-color);
+}
+.tag-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.4rem;
+}

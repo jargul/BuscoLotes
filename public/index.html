@@ -60,6 +60,8 @@
                             <span class="tag-chip" data-word="óleo">óleo</span>
                             <span class="tag-chip" data-word="piedra">piedra</span>
                             <span class="tag-chip" data-word="pinotea">pinotea</span>
+                            <span class="tag-chip" data-word="sillas">sillas</span>
+                            <span class="tag-chip" data-word="termómetro">termómetro</span>
                             <span class="tag-chip" data-word="viena">viena</span>
                         </div>
                     </div>
@@ -98,6 +100,21 @@
     <button id="backToTopBtn" class="back-to-top" title="Volver al inicio" aria-label="Volver al inicio">
         ↑
     </button>
+
+    <!-- Modal de Alarma -->
+    <div id="alarmModal" class="alarm-modal-overlay" style="display:none;">
+        <div class="alarm-modal">
+            <h3>🔔 Recordatorio de Subasta</h3>
+            <p id="alarmLotDesc" class="alarm-lot-desc"></p>
+            <label for="alarmDateTime">Fecha y hora de cierre del lote:</label>
+            <input type="datetime-local" id="alarmDateTime" class="alarm-datetime-input">
+            <p class="alarm-hint">Se creará un recordatorio 15 minutos antes de la hora indicada.</p>
+            <div class="alarm-modal-actions">
+                <button id="alarmConfirmBtn" class="alarm-btn-confirm">📥 Descargar Recordatorio (.ics)</button>
+                <button id="alarmCancelBtn" class="alarm-btn-cancel">Cancelar</button>
+            </div>
+        </div>
+    </div>
 
     <script src="app.js"></script>
 </body>

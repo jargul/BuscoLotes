@@ -93,59 +93,95 @@ function decodeHtmlEntities(str) {
         .replace(/&nbsp;/g, ' ').trim();
 }
 
-async function fetchPradoRematesLots(keywordList, minPricePesos) {
+// Elimina tildes/diacríticos para comparación sin acento
+function normalizeText(str) {
+    return (str || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+async function fetchPradoRematesLots(keywordList) {
     const allMatchingLots = [];
     try {
-        console.log('PradoRemates: buscando...');
-        const kwResults = await Promise.all(keywordList.map(async (kw) => {
-            const lots = [];
+        console.log('PradoRemates: obteniendo categorías...');
+        // Obtener todas las categorías de la tienda
+        const tiendaRes = await axios.get('https://pradorematesenlinea.uy/tienda/', {
+            timeout: 12000,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+        });
+        const tiendaHtml = tiendaRes.data;
+        const catLinks = Array.from(tiendaHtml.matchAll(/href="(https:\/\/pradorematesenlinea\.uy\/categoria-producto\/[^"]+)"/g))
+            .map(m => m[1]);
+        const uniqueCats = [...new Set(catLinks)];
+        console.log(`PradoRemates: ${uniqueCats.length} categorías encontradas`);
+
+        const seen = new Set();
+        for (const catUrl of uniqueCats) {
             let page = 1;
             let hasMore = true;
             while (hasMore) {
-                const searchUrl = `https://pradorematesenlinea.uy/?s=${encodeURIComponent(kw)}&post_type=product${page > 1 ? `&paged=${page}` : ''}`;
-                const r = await axios.get(searchUrl, { timeout: 12000, headers: { 'User-Agent': 'Mozilla/5.0' } });
-                const html = r.data;
-                const items = [...html.matchAll(/<li[^>]*class="[^"]*product[^"]*"[^>]*>([\s\S]+?)<\/li>/g)];
+                const pageUrl = page === 1 ? catUrl : `${catUrl}page/${page}/`;
+                let html;
+                try {
+                    const r = await axios.get(pageUrl, {
+                        timeout: 12000,
+                        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                    });
+                    html = r.data;
+                } catch(e) { break; }
 
+                const items = Array.from(html.matchAll(/<li[^>]*class="[^"]*product[^"]*"[^>]*>([\s\S]+?)<\/li>/g));
                 for (const item of items) {
-                    const raw = item[1];
-                    if (raw.includes('winning_bid')) continue; // lote cerrado/ganado
+                    const raw = item[0];
+                    // Solo lotes activos (uwa_auction_status_live)
+                    if (!raw.includes('uwa_auction_status_live')) continue;
+                    // Ignorar items de categoría
+                    if (raw.includes('woocommerce-loop-category__title')) continue;
 
-                    const title = (raw.match(/woocommerce-loop-product__title[^>]*>([^<]+)/) || [])[1];
-                    const url = (raw.match(/href="(https:\/\/pradorematesenlinea[^"]+)"/) || [])[1];
-                    const img = (raw.match(/<img[^>]+src="([^"]+)"/) || [])[1];
-                    const productId = (raw.match(/data-product_id="(\d+)"/) || [])[1];
-                    const bdi = raw.match(/<bdi>([\s\S]+?)<\/bdi>/);
-                    const rawPrice = bdi
-                        ? bdi[1].replace(/<[^>]+>/g, '').replace(/&#36;|&nbsp;/g, '').replace(/\./g, '').trim()
-                        : '0';
-                    const price = parseFloat(rawPrice) || 0;
+                    // Título desde el atributo alt de la imagen
+                    const altMatch = raw.match(/alt="([^"]+)"/);
+                    const title = altMatch ? decodeHtmlEntities(altMatch[1]) : '';
+                    if (!title) continue;
 
-                    if (!title || !url || price < minPricePesos) continue;
+                    // Filtrar por keyword (sin tilde)
+                    const normalizedTitle = normalizeText(title);
+                    const isMatch = keywordList.some(kw => normalizedTitle.includes(kw));
+                    if (!isMatch) continue;
 
-                    lots.push({
+                    const urlMatch = raw.match(/href="(https:\/\/pradorematesenlinea\.uy\/producto\/[^"]+)"/);
+                    const url = urlMatch ? urlMatch[1] : '';
+                    if (!url || seen.has(url)) continue;
+                    seen.add(url);
+
+                    const imgMatch = raw.match(/src="(https:\/\/pradorematesenlinea\.uy[^"]+\.(?:jpg|jpeg|png|webp)[^"]*)"/);
+                    const img = imgMatch ? imgMatch[1] : '';
+
+                    const postIdMatch = raw.match(/\bpost-(\d+)\b/);
+                    const productId = postIdMatch ? postIdMatch[1] : url;
+
+                    const lotMatch = title.match(/[Ll]ote\s*[#№]?\s*(\d+[A-Za-z]*)/);
+                    const lotNumber = lotMatch ? lotMatch[1] : '';
+
+                    allMatchingLots.push({
                         source: 'PradoRemates',
                         auctionId: 'prado',
                         auctionName: 'Prado Remates en Línea',
-                        lotId: productId || url,
-                        lotNumber: productId,
-                        endDate: null, // Prado is scraped HTML, no easy end date
-                        description: decodeHtmlEntities(title),
+                        lotId: productId,
+                        lotNumber,
+                        endDate: null,
+                        description: title,
                         imageUrl: img || '',
                         url,
-                        basePrice: price,
-                        currentPrice: price,
+                        basePrice: 0,
+                        currentPrice: 0,
                         currencyPrefix: '$'
                     });
                 }
 
-                hasMore = html.includes('class="next page-numbers"') && items.length > 0;
+                hasMore = html.includes('class="next page-numbers"');
                 page++;
-                if (page > 5) hasMore = false; // límite de seguridad
+                if (page > 15) break;
             }
-            return lots;
-        }));
-        allMatchingLots.push(...kwResults.flat());
+        }
+        console.log(`PradoRemates: ${allMatchingLots.length} lotes encontrados`);
     } catch (e) {
         console.error('PradoRemates Error:', e.message);
     }
@@ -207,7 +243,7 @@ async function fetchBavastroLots(keywordList, minPricePesos, USD_TO_PESOS) {
                         let isMatch = false;
 
                         for (const kw of uncached) {
-                            if (description.includes(kw)) {
+                            if (normalizeText(description).includes(kw)) {
                                 cache.bavastro[auctionId][kw].push(lotId);
                                 isMatch = true;
                             }
@@ -315,8 +351,8 @@ async function fetchArechagaLots(keywordList, minPricePesos, USD_TO_PESOS) {
 
                 for (const lot of lots) {
                     const lotId = String(lot.id);
-                    const titleText = (lot.title || '').toLowerCase();
-                    const descText = (lot.description || '').toLowerCase();
+                    const titleText = normalizeText(lot.title || '');
+                    const descText = normalizeText(lot.description || '');
                     let isMatch = false;
 
                     for (const kw of uncached) {
@@ -421,8 +457,8 @@ async function fetchReySubastasLots(keywordList, minPricePesos, USD_TO_PESOS) {
 
                 for (const lot of lots) {
                     const lotId = String(lot.id);
-                    const titleText = (lot.title || '').toLowerCase();
-                    const descText = (lot.description || '').toLowerCase();
+                    const titleText = normalizeText(lot.title || '');
+                    const descText = normalizeText(lot.description || '');
                     let isMatch = false;
 
                     for (const kw of uncached) {
@@ -542,7 +578,7 @@ async function fetchCastellsLots(keywordList, minPricePesos, USD_TO_PESOS) {
 
                         for (const lot of lots) {
                             const lotId = String(lot.LoteId);
-                            const description = (lot.LoteDescripcion || '').toLowerCase();
+                            const description = normalizeText(lot.LoteDescripcion || '');
                             let isMatch = false;
 
                             for (const kw of uncached) {
@@ -700,6 +736,9 @@ async function fetchRemotesLots(keywordList, minPricePesos) {
 
             const auctioneer = cache.remotes[auctionId]._auctioneer;
 
+            // Cache de precios por lote
+            if (!cache.remotes[auctionId]._prices) cache.remotes[auctionId]._prices = {};
+
             for (const kw of uncached) cache.remotes[auctionId][kw] = [];
 
             const cachedLotIds = new Set(
@@ -714,7 +753,7 @@ async function fetchRemotesLots(keywordList, minPricePesos) {
                 if (lotMatch) lotId = lotMatch[1];
                 lotId = String(lotId);
 
-                const description = lot.title.toLowerCase();
+                const description = normalizeText(lot.title);
                 let isMatch = false;
 
                 for (const kw of uncached) {
@@ -727,11 +766,10 @@ async function fetchRemotesLots(keywordList, minPricePesos) {
                 if (cachedLotIds.has(lotId)) isMatch = true;
 
                 if (isMatch) {
-                    // Los lots del XML no proveen un precio así que lo bypasseamos explícitamente y lo cargamos
                     let formattedDate = '';
                     if (auction.fechaTs) {
                         try {
-                            const d = new Date(auction.fechaTs * 1000); // Unix timestamp
+                            const d = new Date(auction.fechaTs * 1000);
                             if (!isNaN(d)) formattedDate = d.toLocaleDateString('es-UY', { day: '2-digit', month: '2-digit', year: '2-digit' });
                         } catch(e){}
                     }
@@ -747,13 +785,46 @@ async function fetchRemotesLots(keywordList, minPricePesos) {
                         description: lot.title,
                         imageUrl: lot.foto,
                         url: lot.link,
-                        basePrice: 0,
-                        currentPrice: 0,
+                        basePrice: 0,     // se actualiza abajo
+                        currentPrice: 0,  // se actualiza abajo
                         currencyPrefix: '$',
                         isNew: remIsNew
                     });
                 }
             }
+
+            // Scraping de precios en paralelo para lotes que no tienen precio cacheado
+            const priceCache = cache.remotes[auctionId]._prices;
+            const lotsNeedingPrice = matchingLots.filter(l => !(l.lotId in priceCache));
+            if (lotsNeedingPrice.length > 0) {
+                console.log(`Remotes: obteniendo precio de ${lotsNeedingPrice.length} lotes del remate ${auctionId}...`);
+                await Promise.all(lotsNeedingPrice.map(async (lot) => {
+                    try {
+                        const lotRes = await axios.get(lot.url, {
+                            timeout: 10000,
+                            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+                        });
+                        const html = lotRes.data;
+                        // Precio actual (oferta): "price":N
+                        const priceMatch = html.match(/"price"\s*:\s*(\d+[.,]?\d*)/);
+                        // Precio base/salida: "precio":N o "salida":N
+                        const baseMatch = html.match(/"(?:precio|salida|salidaMinima|base)"\s*:\s*(\d+[.,]?\d*)/);
+                        priceCache[lot.lotId] = {
+                            current: priceMatch ? parseFloat(priceMatch[1].replace(',', '.')) : 0,
+                            base: baseMatch ? parseFloat(baseMatch[1].replace(',', '.')) : 0
+                        };
+                    } catch(e) {
+                        priceCache[lot.lotId] = { current: 0, base: 0 };
+                    }
+                }));
+            }
+
+            // Asignar precios a los lotes
+            matchingLots.forEach(lot => {
+                const p = priceCache[lot.lotId] || { current: 0, base: 0 };
+                lot.basePrice = p.base;
+                lot.currentPrice = p.current;
+            });
 
             return matchingLots;
         }));
@@ -771,7 +842,7 @@ app.get('/api/search', async (req, res) => {
         const { keywords, minPrice } = req.query;
         if (!keywords) return res.status(400).json({ error: 'Faltan parámetros: keywords' });
 
-        const keywordList = keywords.toLowerCase().split(/\s+/).filter(k => k).sort();
+        const keywordList = keywords.toLowerCase().split(/\s+/).filter(k => k).map(k => normalizeText(k)).sort();
         const minPricePesos = minPrice !== undefined && minPrice !== '' ? parseFloat(minPrice) : 1000;
         const USD_TO_PESOS = 40;
         const ckFn = kw => `${kw}:${minPricePesos}`;
@@ -797,7 +868,7 @@ app.get('/api/search', async (req, res) => {
             fetchCastellsLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
             fetchArechagaLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
             fetchReySubastasLots(uncachedKeywords, minPricePesos, USD_TO_PESOS),
-            fetchPradoRematesLots(uncachedKeywords, minPricePesos),
+            fetchPradoRematesLots(uncachedKeywords),
             fetchRemotesLots(uncachedKeywords, minPricePesos)
         ]);
 
@@ -807,7 +878,7 @@ app.get('/api/search', async (req, res) => {
 
         // Cachear cada keyword nueva por separado
         for (const kw of uncachedKeywords) {
-            const kwLots = newLots.filter(lot => (lot.description || '').toLowerCase().includes(kw));
+            const kwLots = newLots.filter(lot => normalizeText(lot.description || '').includes(kw));
             RESULT_CACHE[ckFn(kw)] = { results: kwLots, ts: Date.now() };
         }
 
