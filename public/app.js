@@ -162,8 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const minutes = alarmTime.getMinutes();
         const message = `Lote Subasta: ${currentAlarmItem.description?.substring(0, 30) || 'Cierre'}`;
         
-        // Intent URL directo en el href para que Chrome lo trate como navegación de usuario
-        const intentUrl = `intent://#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${hour};i.android.intent.extra.alarm.MINUTES=${minutes};S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(message)};i.hour=${hour};i.minutes=${minutes};S.message=${encodeURIComponent(message)};B.android.intent.extra.alarm.SKIP_UI=false;end`;
+        // intent:// requiere host para que Chrome lo parsee correctamente; SKIP_UI=true agrega la alarma sin confirmar
+        const intentUrl = `intent://alarm#Intent;action=android.intent.action.SET_ALARM;i.android.intent.extra.alarm.HOUR=${hour};i.android.intent.extra.alarm.MINUTES=${minutes};S.android.intent.extra.alarm.MESSAGE=${encodeURIComponent(message)};B.android.intent.extra.alarm.SKIP_UI=true;end`;
         
         alarmAndroid.href = intentUrl;
     }
@@ -240,8 +240,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (alarmAndroid) {
         alarmAndroid.addEventListener('click', () => {
-            // Cerramos el modal después de un pequeño delay para que el link tenga tiempo de dispararse
-            setTimeout(() => { alarmModal.style.display = 'none'; }, 500);
+            const orig = alarmAndroid.textContent;
+            alarmAndroid.textContent = '✅ Alarma agregada';
+            setTimeout(() => {
+                alarmAndroid.textContent = orig;
+                alarmModal.style.display = 'none';
+            }, 1200);
         });
     }
 
