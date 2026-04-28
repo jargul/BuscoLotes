@@ -245,8 +245,29 @@ document.addEventListener('DOMContentLoaded', () => {
         alarmAndroid.addEventListener('click', (e) => {
             e.preventDefault();
             const url = alarmAndroid.href;
-            if (url) window.location.href = url;
-            setTimeout(() => { alarmModal.style.display = 'none'; }, 600);
+            if (!url) return;
+
+            // Detectar si Chrome abrió la app de Reloj: cuando Android cambia de app,
+            // la página queda en background y document.hidden se vuelve true
+            let clockOpened = false;
+            const onVis = () => { if (document.hidden) clockOpened = true; };
+            document.addEventListener('visibilitychange', onVis);
+
+            window.location.href = url;
+
+            // Después de 3 segundos: si la página sigue visible, el intent falló
+            setTimeout(() => {
+                document.removeEventListener('visibilitychange', onVis);
+                alarmModal.style.display = 'none';
+                if (!clockOpened) {
+                    // El app de Reloj no respondió — ofrecer ICS como fallback
+                    setTimeout(() => {
+                        if (confirm('La app de Reloj no respondió.\n¿Descargar recordatorio de calendario en su lugar?')) {
+                            alarmConfirm.click();
+                        }
+                    }, 150);
+                }
+            }, 3000);
         });
     }
 
